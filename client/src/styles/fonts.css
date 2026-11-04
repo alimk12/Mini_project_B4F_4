@@ -1,0 +1,5 @@
+/* System fonts only: no Google Fonts or any CDN, so the site works in Syria without a VPN. */
+:root {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+}

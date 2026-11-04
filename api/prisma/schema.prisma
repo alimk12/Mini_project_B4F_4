@@ -1,0 +1,190 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  INSTRUCTOR
+  STUDENT
+}
+
+enum TestType {
+  MCQ
+  CODING
+}
+
+enum TestStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  EXPIRED
+  TERMINATED
+}
+
+enum ViolationType {
+  FULLSCREEN_EXIT
+  TAB_HIDDEN
+  COPY
+  CUT
+  PASTE_EXTERNAL
+  DROP_EXTERNAL
+  NEW_SESSION
+}
+
+enum TestCaseVisibility {
+  SAMPLE
+  HIDDEN
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  fullName     String    @map("full_name")
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  role         Role
+  createdAt    DateTime  @default(now()) @map("created_at")
+  attempts     Attempt[]
+
+  @@map("users")
+}
+
+model Test {
+  id              Int        @id @default(autoincrement())
+  title           String
+  type            TestType
+  order           Int        @unique
+  durationMinutes Int        @map("duration_minutes")
+  status          TestStatus @default(DRAFT)
+  questions       Question[]
+  problems        Problem[]
+  attempts        Attempt[]
+
+  @@map("tests")
+}
+
+model Question {
+  id       Int         @id @default(autoincrement())
+  testId   Int         @map("test_id")
+  text     String
+  position Int
+  test     Test        @relation(fields: [testId], references: [id], onDelete: Cascade)
+  options  Option[]
+  answers  McqAnswer[]
+
+  @@map("questions")
+}
+
+model Option {
+  id         Int         @id @default(autoincrement())
+  questionId Int         @map("question_id")
+  text       String
+  isCorrect  Boolean     @map("is_correct")
+  position   Int
+  question   Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  answers    McqAnswer[]
+
+  @@map("options")
+}
+
+model Problem {
+  id           Int             @id @default(autoincrement())
+  testId       Int             @map("test_id")
+  title        String
+  description  String
+  functionName String          @map("function_name")
+  points       Int
+  position     Int
+  test         Test            @relation(fields: [testId], references: [id], onDelete: Cascade)
+  testCases    TestCase[]
+  results      ProblemResult[]
+
+  @@map("problems")
+}
+
+model TestCase {
+  id         Int                @id @default(autoincrement())
+  problemId  Int                @map("problem_id")
+  visibility TestCaseVisibility
+  args       Json
+  expected   Json
+  position   Int
+  problem    Problem            @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@map("test_cases")
+}
+
+model Attempt {
+  id                Int                @id @default(autoincrement())
+  userId            Int                @map("user_id")
+  testId            Int                @map("test_id")
+  status            AttemptStatus      @default(IN_PROGRESS)
+  startedAt         DateTime           @map("started_at")
+  deadline          DateTime
+  submittedAt       DateTime?          @map("submitted_at")
+  terminatedAt      DateTime?          @map("terminated_at")
+  terminationReason String?            @map("termination_reason")
+  score             Float?
+  sessionKey        String?            @map("session_key")
+  questionOrder     Json?              @map("question_order")
+  optionOrder       Json?              @map("option_order")
+  user              User               @relation(fields: [userId], references: [id])
+  test              Test               @relation(fields: [testId], references: [id])
+  mcqAnswers        McqAnswer[]
+  problemResults    ProblemResult[]
+  violations        AttemptViolation[]
+
+  @@unique([userId, testId])
+  @@index([testId, status])
+  @@map("attempts")
+}
+
+model McqAnswer {
+  id         Int      @id @default(autoincrement())
+  attemptId  Int      @map("attempt_id")
+  questionId Int      @map("question_id")
+  optionId   Int?     @map("option_id")
+  isCorrect  Boolean  @map("is_correct")
+  attempt    Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question   Question @relation(fields: [questionId], references: [id])
+  option     Option?  @relation(fields: [optionId], references: [id])
+
+  @@unique([attemptId, questionId])
+  @@map("mcq_answers")
+}
+
+model ProblemResult {
+  id          Int       @id @default(autoincrement())
+  attemptId   Int       @map("attempt_id")
+  problemId   Int       @map("problem_id")
+  runCount    Int       @default(0) @map("run_count")
+  code        String?
+  passedCount Int?      @map("passed_count")
+  totalCount  Int?      @map("total_count")
+  points      Float?
+  submittedAt DateTime? @map("submitted_at")
+  attempt     Attempt   @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  problem     Problem   @relation(fields: [problemId], references: [id])
+
+  @@unique([attemptId, problemId])
+  @@map("problem_results")
+}
+
+model AttemptViolation {
+  id         Int           @id @default(autoincrement())
+  attemptId  Int           @map("attempt_id")
+  type       ViolationType
+  counted    Boolean
+  occurredAt DateTime      @default(now()) @map("occurred_at")
+  attempt    Attempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId, occurredAt])
+  @@map("attempt_violations")
+}

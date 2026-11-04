@@ -1,0 +1,8 @@
+# Replace the placeholders with GitHub usernames before enabling branch protection.
+# Ownership follows docs/PROJECT-STRUCTURE.md §12.
+
+/docs/                         @alimk12
+/client/                       @alimk12 @maya-github-username
+/client/src/pages/student/     @maya-github-username
+/client/src/editor/CodeEditor* @maya-github-username
+/api/                          @esmaeel-github-username @majed-github-username @rami-github-username

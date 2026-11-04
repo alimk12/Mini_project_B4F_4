@@ -1,0 +1,15 @@
+export const GRACE_SECONDS = 10;
+export const MAX_RUNS_PER_PROBLEM = 20;
+export const MAX_CODE_LENGTH = 10_000;
+export const MIN_MCQ_QUESTIONS_TO_PUBLISH = 5;
+export const MIN_CODING_PROBLEMS_TO_PUBLISH = 1;
+export const MIN_OPTIONS = 2;
+export const MAX_OPTIONS = 6;
+export const MIN_SAMPLE_CASES = 1;
+export const MIN_HIDDEN_CASES = 3;
+export const MIN_PASSWORD_LENGTH = 8;
+export const MAX_POINTS = 100;
+export const FOCUS_VIOLATION_LIMIT = 2;
+export const CLIPBOARD_VIOLATION_LIMIT = 3;
+export const VIOLATION_DEDUPE_SECONDS = 2;
+export const ATTEMPT_SESSION_HEADER = 'x-attempt-session';
