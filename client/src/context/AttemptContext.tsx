@@ -34,27 +34,31 @@ interface Value {
   isSessionReplaced: boolean;
 }
 
-// Every 409 has the same status, so the message tells the cases apart (docs/API.md 19.4).
+// Every 409 has the same status, so the message tells the cases apart (docs/API.md 19.4 and 12).
 const SESSION_REPLACED_START = 'This attempt is open in another window or device.';
 const isSessionReplacedError = (e: unknown) =>
   e instanceof ApiError && e.status === 409 && e.message.startsWith(SESSION_REPLACED_START);
+
+// The attempt changed on the server (time over, ended by the rules, already submitted): reload it.
+const STATE_CONFLICT_STARTS = [
+  'Time is over.',
+  'This attempt was ended because the exam rules were broken.',
+  'This test has already been submitted.',
+];
+const isStateConflictError = (e: unknown) =>
+  e instanceof ApiError && e.status === 409 && STATE_CONFLICT_STARTS.some((start) => e.message.startsWith(start));
+
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Please try again.');
 
 // Built in the next steps. They do nothing yet.
 const notYet = async () => false;
 const PENDING = {
-  isSubmitting: false,
-  actionError: null as string | null,
-  submitMcq: notYet,
-  saveMcqAnswer: notYet,
-  savingQuestionIds: [] as number[],
   runResults: {} as Record<number, RunResult>,
   submitResults: {} as Record<number, SubmitResult>,
   runningProblemId: null as number | null,
   runCode: notYet,
   submitCode: notYet,
   finishCoding: notYet,
-  clearActionError: () => {},
   lastWarning: null as string | null,
   reportViolation: async () => {},
   clearWarning: () => {},
@@ -70,9 +74,13 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [integrity, setIntegrity] = useState<AttemptIntegrity | null>(null);
   const [isSessionReplaced, setIsSessionReplaced] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [savingQuestionIds, setSavingQuestionIds] = useState<number[]>([]);
 
   const latestRequest = useRef(0); // only the newest request may write its answer
   const currentAttemptId = useRef<number | null>(null);
+  const saveCounter = useRef<Record<number, number>>({}); // newest save number per question
 
   // A different student (or a sign-out) must never see the previous attempt.
   const userId = user?.id ?? null;
@@ -85,6 +93,9 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
     setServerOffsetMs(0);
     setIntegrity(null);
     setIsSessionReplaced(false);
+    setIsSubmitting(false);
+    setActionError(null);
+    setSavingQuestionIds([]);
   }
 
   // Every attempt response updates the attempt, the clock offset and the integrity counters.
@@ -102,6 +113,8 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
       setAttempt(null);
       setIntegrity(null);
       setIsSessionReplaced(false);
+      setActionError(null);
+      setSavingQuestionIds([]);
       setIsAttemptLoading(true);
       setAttemptError(null);
       try {
@@ -128,6 +141,8 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
         setAttempt(null);
         setIntegrity(null);
         setIsSessionReplaced(false);
+        setActionError(null);
+        setSavingQuestionIds([]);
       }
       setIsAttemptLoading(true);
       setAttemptError(null);
@@ -149,12 +164,72 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
     [showAttempt],
   );
 
+  // The same reaction for every action the server rejects with 409.
+  const reactToConflict = useCallback(
+    (e: unknown, attemptId: number) => {
+      if (isSessionReplacedError(e)) setIsSessionReplaced(true);
+      else if (isStateConflictError(e)) void loadAttempt(attemptId);
+    },
+    [loadAttempt],
+  );
+
+  // Autosave: quiet on success. The page keeps the choices and decides about retries.
+  const saveMcqAnswer = useCallback(
+    async (questionId: number, optionId: number | null) => {
+      const attemptId = currentAttemptId.current;
+      if (attemptId === null) return false;
+      const mine = (saveCounter.current[questionId] ?? 0) + 1;
+      saveCounter.current[questionId] = mine;
+      setSavingQuestionIds((prev) => (prev.includes(questionId) ? prev : [...prev, questionId]));
+      try {
+        await api.saveMcqAnswer(attemptId, questionId, optionId);
+        return true;
+      } catch (e) {
+        reactToConflict(e, attemptId);
+        return false;
+      } finally {
+        // Only the newest save of this question may switch "Saving…" off.
+        if (saveCounter.current[questionId] === mine) {
+          setSavingQuestionIds((prev) => prev.filter((id) => id !== questionId));
+        }
+      }
+    },
+    [reactToConflict],
+  );
+
+  const submitMcq = useCallback(
+    async (answers: McqAnswerPayload[]) => {
+      const attemptId = currentAttemptId.current;
+      if (attemptId === null) return false;
+      setIsSubmitting(true);
+      setActionError(null);
+      try {
+        await api.submitMcq(attemptId, answers);
+        await loadAttempt(attemptId); // the result screen is built from the stored attempt
+        return true;
+      } catch (e) {
+        if (!isSessionReplacedError(e)) setActionError(message(e));
+        reactToConflict(e, attemptId);
+        return false;
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [loadAttempt, reactToConflict],
+  );
+
+  const clearActionError = useCallback(() => setActionError(null), []);
+
   const value = useMemo<Value>(
     () => ({
       attempt, isAttemptLoading, attemptError, startAttempt, loadAttempt, serverOffsetMs, integrity, isSessionReplaced,
+      isSubmitting, actionError, submitMcq, saveMcqAnswer, savingQuestionIds, clearActionError,
       ...PENDING,
     }),
-    [attempt, isAttemptLoading, attemptError, startAttempt, loadAttempt, serverOffsetMs, integrity, isSessionReplaced],
+    [
+      attempt, isAttemptLoading, attemptError, startAttempt, loadAttempt, serverOffsetMs, integrity, isSessionReplaced,
+      isSubmitting, actionError, submitMcq, saveMcqAnswer, savingQuestionIds, clearActionError,
+    ],
   );
   return <AttemptContext.Provider value={value}>{children}</AttemptContext.Provider>;
 }
