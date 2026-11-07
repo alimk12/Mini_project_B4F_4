@@ -1,0 +1,49 @@
+.my-results-page {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+.my-results__table-wrap {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.my-results__table {
+  min-width: 34rem;
+}
+
+.my-results__title {
+  font-weight: 600;
+}
+
+.my-results__type {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.my-results__result {
+  font-weight: 600;
+}
+
+.my-results__result--submitted {
+  color: var(--color-success);
+}
+
+.my-results__result--expired {
+  color: var(--color-error);
+}
+
+.my-results__result--terminated {
+  color: var(--color-terminated);
+}
+
+.my-results__time {
+  white-space: nowrap;
+  color: var(--color-text-muted);
+}
