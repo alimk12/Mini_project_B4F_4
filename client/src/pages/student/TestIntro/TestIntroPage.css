@@ -1,0 +1,89 @@
+.test-intro-page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+.test-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.test-intro__meta {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.test-intro__heading {
+  margin: 0.5rem 0 0;
+}
+
+.test-intro__rules {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.test-intro__pledge {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.9rem 1rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.test-intro__checkbox {
+  width: auto;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+  padding: 0;
+}
+
+.test-intro__pledge-line {
+  display: block;
+}
+
+.test-intro__notice,
+.test-intro__error {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  background: var(--color-error-light);
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.test-intro__note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.test-intro__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.test-intro__back {
+  font-weight: 600;
+}
+
+.test-intro__problem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
