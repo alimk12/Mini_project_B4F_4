@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Button from '../../../components/common/Button';
 import ErrorMessage from '../../../components/common/ErrorMessage';
 import Loading from '../../../components/common/Loading';
+import { GRACE_SECONDS } from '../../../constants';
 import { useAttempt } from '../../../context/AttemptContext';
 import { useStudentTests } from '../../../context/StudentTestsContext';
 import { useFullscreen } from '../../../exam-guard/useFullscreen';
 import AttemptResult from './AttemptResult';
+import McqTestView from './McqTestView';
+import { useMcqChoices } from './useMcqChoices';
 import './AttemptPage.css';
 
 const REPLACED = 'This attempt is open in another window or device.';
@@ -30,7 +33,10 @@ export default function AttemptPage() {
   const attemptId = Number(attemptIdParam);
   const isValidId = Number.isInteger(attemptId) && attemptId > 0;
 
-  const { attempt, attemptError, loadAttempt, startAttempt, isSessionReplaced } = useAttempt();
+  const {
+    attempt, attemptError, loadAttempt, startAttempt, isSessionReplaced,
+    serverOffsetMs, saveMcqAnswer, submitMcq, isSubmitting, actionError,
+  } = useAttempt();
   const { tests, loadTests } = useStudentTests();
   const { enter, exit } = useFullscreen();
   const navigate = useNavigate();
@@ -38,10 +44,15 @@ export default function AttemptPage() {
   const [requestedId, setRequestedId] = useState<number | null>(null);
   const [isResuming, setIsResuming] = useState(false);
   const [fullscreenRefused, setFullscreenRefused] = useState(false);
+  const [timedUpFor, setTimedUpFor] = useState<number | null>(null); // the attempt whose time is over
 
   // The context may still hold another attempt: only this attempt counts.
   const current = attempt && attempt.id === attemptId ? attempt : null;
   const isFinished = current !== null && current.status !== 'IN_PROGRESS';
+  const isTimeUp = timedUpFor === attemptId;
+
+  // The MCQ choices live here (outside the question screen), so leaving the screen never loses them.
+  const { choices, statuses, choose, buildAnswers } = useMcqChoices(current, saveMcqAnswer);
 
   // "Continue here" needs the test id. A window that never loaded the attempt finds it in the test list.
   const resumeTestId = current?.testId ?? tests.find((test) => test.attemptId === attemptId)?.id ?? null;
@@ -60,6 +71,18 @@ export default function AttemptPage() {
   useEffect(() => {
     if (isFinished) void exit();
   }, [isFinished]);
+
+  // Time is over: after the grace period the server has expired the attempt, so reload it.
+  useEffect(() => {
+    if (!isTimeUp) return;
+    const timer = window.setTimeout(() => {
+      void loadAttempt(attemptId);
+    }, GRACE_SECONDS * 1000 + 1000);
+    return () => window.clearTimeout(timer);
+  }, [isTimeUp, attemptId, loadAttempt]);
+
+  const handleTimeUp = useCallback(() => setTimedUpFor(attemptId), [attemptId]);
+  const handleSubmit = useCallback(() => submitMcq(buildAnswers()), [submitMcq, buildAnswers]);
 
   // Continue here: full screen first (the browser allows it only right after a click), then resume.
   async function handleContinueHere() {
@@ -110,14 +133,25 @@ export default function AttemptPage() {
     content = <Loading />;
   } else if (current.status !== 'IN_PROGRESS') {
     content = <AttemptResult attempt={current} />;
-  } else {
-    // The MCQ view (step 13) and the coding view (step 16) will replace this placeholder.
-    const count = current.type === 'MCQ' ? current.questions?.length ?? 0 : current.problems?.length ?? 0;
+  } else if (current.type === 'MCQ') {
     content = (
-      <p className="attempt__placeholder">
-        Test view comes next: {count} {current.type === 'MCQ' ? 'questions' : 'problems'}.
-      </p>
+      <McqTestView
+        questions={current.questions ?? []}
+        deadline={current.deadline}
+        serverOffsetMs={serverOffsetMs}
+        choices={choices}
+        statuses={statuses}
+        isTimeUp={isTimeUp}
+        isSubmitting={isSubmitting}
+        actionError={actionError}
+        onChoose={choose}
+        onTimeUp={handleTimeUp}
+        onSubmit={handleSubmit}
+      />
     );
+  } else {
+    // The coding view (step 16) will replace this placeholder.
+    content = <p className="attempt__placeholder">Coding view comes next: {current.problems?.length ?? 0} problems.</p>;
   }
 
   return (
