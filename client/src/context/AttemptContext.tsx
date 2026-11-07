@@ -3,7 +3,7 @@ import { ApiError } from '../services/http';
 import * as api from '../services/student.api';
 import { ClientViolationType } from '../types/common.types';
 import { RunResult, SubmitResult } from '../types/execution.types';
-import { AttemptIntegrity, McqAnswerPayload, StudentAttempt, StudentProblem } from '../types/student.types';
+import { AttemptIntegrity, McqAnswerPayload, StudentAttempt, StudentProblem, ViolationResult } from '../types/student.types';
 import { saveAttemptSession } from '../utils/attemptSession';
 import { getOffsetMs } from '../utils/serverClock';
 import { useAuth } from './AuthContext';
@@ -52,12 +52,9 @@ const isStateConflictError = (e: unknown) =>
 
 const message = (e: unknown) => (e instanceof Error ? e.message : 'Something went wrong. Please try again.');
 
-// Built in the next step. They do nothing yet.
-const PENDING = {
-  lastWarning: null as string | null,
-  reportViolation: async () => {},
-  clearWarning: () => {},
-};
+// A violation report that failed is tried once more after this pause.
+const RETRY_DELAY_MS = 1000;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const AttemptContext = createContext<Value | undefined>(undefined);
 
@@ -68,6 +65,7 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
   const [attemptError, setAttemptError] = useState<string | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState(0);
   const [integrity, setIntegrity] = useState<AttemptIntegrity | null>(null);
+  const [lastWarning, setLastWarning] = useState<string | null>(null);
   const [isSessionReplaced, setIsSessionReplaced] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -84,6 +82,7 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
   const resetAttemptState = useCallback(() => {
     setAttempt(null);
     setIntegrity(null);
+    setLastWarning(null);
     setIsSessionReplaced(false);
     setActionError(null);
     setSavingQuestionIds([]);
@@ -303,6 +302,56 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
     }
   }, [loadAttempt, reportFailure]);
 
+  // The browser only reports. The server counts and decides: warning or termination.
+  // A failed report is tried once more and never blocks the page.
+  const reportViolation = useCallback(
+    async (type: ClientViolationType) => {
+      const attemptId = currentAttemptId.current;
+      if (attemptId === null) return;
+      let result: ViolationResult | null = null;
+      for (let attemptNumber = 1; attemptNumber <= 2 && result === null; attemptNumber += 1) {
+        try {
+          result = await api.reportViolation(attemptId, type);
+        } catch (e) {
+          if (isSessionReplacedError(e) || isStateConflictError(e)) {
+            reactToConflict(e, attemptId); // a clear answer from the server: no second try
+            return;
+          }
+          if (attemptNumber === 1) await wait(RETRY_DELAY_MS);
+        }
+      }
+      if (result === null || currentAttemptId.current !== attemptId) return;
+
+      setIntegrity({
+        focusViolations: result.focusViolations,
+        focusLimit: result.focusLimit,
+        clipboardViolations: result.clipboardViolations,
+        clipboardLimit: result.clipboardLimit,
+      });
+      // A report that was not counted has no warning: it must not erase the one on screen.
+      if (result.terminated) setLastWarning(null);
+      else if (result.warning) setLastWarning(result.warning);
+
+      const ended = result.terminated ? result.result : null;
+      if (ended) {
+        setAttempt((prev) =>
+          prev && prev.id === attemptId
+            ? {
+                ...prev,
+                status: 'TERMINATED',
+                questions: null,
+                problems: null,
+                result: { score: ended.score, label: ended.label, terminationReason: ended.terminationReason },
+              }
+            : prev,
+        );
+        void loadAttempt(attemptId); // fills in the termination time and the details
+      }
+    },
+    [loadAttempt, reactToConflict],
+  );
+
+  const clearWarning = useCallback(() => setLastWarning(null), []);
   const clearActionError = useCallback(() => setActionError(null), []);
 
   const value = useMemo<Value>(
@@ -310,12 +359,13 @@ export function AttemptProvider({ children }: { children: ReactNode }) {
       attempt, isAttemptLoading, attemptError, startAttempt, loadAttempt, serverOffsetMs, integrity, isSessionReplaced,
       isSubmitting, actionError, submitMcq, saveMcqAnswer, savingQuestionIds, clearActionError,
       runResults, submitResults, runningProblemId, runCode, submitCode, finishCoding,
-      ...PENDING,
+      lastWarning, reportViolation, clearWarning,
     }),
     [
       attempt, isAttemptLoading, attemptError, startAttempt, loadAttempt, serverOffsetMs, integrity, isSessionReplaced,
       isSubmitting, actionError, submitMcq, saveMcqAnswer, savingQuestionIds, clearActionError,
       runResults, submitResults, runningProblemId, runCode, submitCode, finishCoding,
+      lastWarning, reportViolation, clearWarning,
     ],
   );
   return <AttemptContext.Provider value={value}>{children}</AttemptContext.Provider>;
