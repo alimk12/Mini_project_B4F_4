@@ -6,8 +6,12 @@ import Loading from '../../../components/common/Loading';
 import { GRACE_SECONDS } from '../../../constants';
 import { useAttempt } from '../../../context/AttemptContext';
 import { useStudentTests } from '../../../context/StudentTestsContext';
+import FullscreenGate from '../../../exam-guard/FullscreenGate';
+import { useExamGuard } from '../../../exam-guard/useExamGuard';
 import { useFullscreen } from '../../../exam-guard/useFullscreen';
+import ViolationWarningDialog from '../../../exam-guard/ViolationWarningDialog';
 import AttemptResult from './AttemptResult';
+import IntegrityStatus from './IntegrityStatus';
 import McqTestView from './McqTestView';
 import { useMcqChoices } from './useMcqChoices';
 import './AttemptPage.css';
@@ -36,9 +40,10 @@ export default function AttemptPage() {
   const {
     attempt, attemptError, loadAttempt, startAttempt, isSessionReplaced,
     serverOffsetMs, saveMcqAnswer, submitMcq, isSubmitting, actionError,
+    integrity, lastWarning, reportViolation, clearWarning,
   } = useAttempt();
   const { tests, loadTests } = useStudentTests();
-  const { enter, exit } = useFullscreen();
+  const { isFullscreen, enter, exit } = useFullscreen();
   const navigate = useNavigate();
 
   const [requestedId, setRequestedId] = useState<number | null>(null);
@@ -51,7 +56,11 @@ export default function AttemptPage() {
   const isFinished = current !== null && current.status !== 'IN_PROGRESS';
   const isTimeUp = timedUpFor === attemptId;
 
-  // The MCQ choices live here (outside the question screen), so leaving the screen never loses them.
+  // The browser only reports. The guard watches only while the exam is really running.
+  const isActive = current?.status === 'IN_PROGRESS' && !isTimeUp && !isSessionReplaced;
+  useExamGuard({ isActive, onViolation: reportViolation });
+
+  // The MCQ choices live here (outside the gate), so leaving full screen never loses them.
   const { choices, statuses, choose, buildAnswers } = useMcqChoices(current, saveMcqAnswer);
 
   // "Continue here" needs the test id. A window that never loaded the attempt finds it in the test list.
@@ -133,33 +142,48 @@ export default function AttemptPage() {
     content = <Loading />;
   } else if (current.status !== 'IN_PROGRESS') {
     content = <AttemptResult attempt={current} />;
-  } else if (current.type === 'MCQ') {
-    content = (
-      <McqTestView
-        questions={current.questions ?? []}
-        deadline={current.deadline}
-        serverOffsetMs={serverOffsetMs}
-        choices={choices}
-        statuses={statuses}
-        isTimeUp={isTimeUp}
-        isSubmitting={isSubmitting}
-        actionError={actionError}
-        onChoose={choose}
-        onTimeUp={handleTimeUp}
-        onSubmit={handleSubmit}
-      />
-    );
   } else {
-    // The coding view (step 16) will replace this placeholder.
-    content = <p className="attempt__placeholder">Coding view comes next: {current.problems?.length ?? 0} problems.</p>;
+    const view =
+      current.type === 'MCQ' ? (
+        <McqTestView
+          questions={current.questions ?? []}
+          deadline={current.deadline}
+          serverOffsetMs={serverOffsetMs}
+          choices={choices}
+          statuses={statuses}
+          isTimeUp={isTimeUp}
+          isSubmitting={isSubmitting}
+          actionError={actionError}
+          onChoose={choose}
+          onTimeUp={handleTimeUp}
+          onSubmit={handleSubmit}
+        />
+      ) : (
+        // The coding view (step 16) will replace this placeholder.
+        <p className="attempt__placeholder">Coding view comes next: {current.problems?.length ?? 0} problems.</p>
+      );
+    content = (
+      <FullscreenGate isFullscreen={isFullscreen} onEnter={enter}>
+        {view}
+      </FullscreenGate>
+    );
   }
 
   return (
     <div className="attempt">
       <header className="attempt__header">
         <h1 className="attempt__title">{current ? current.testTitle : 'Exam'}</h1>
+        {current?.status === 'IN_PROGRESS' && integrity && <IntegrityStatus integrity={integrity} />}
       </header>
       <div className="attempt__body">{content}</div>
+      {/* OUTSIDE the gate: leaving full screen is itself a violation, so the warning must stay visible then. */}
+      <ViolationWarningDialog
+        warning={lastWarning}
+        onReturn={() => {
+          clearWarning();
+          void enter();
+        }}
+      />
     </div>
   );
 }
