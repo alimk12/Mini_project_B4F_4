@@ -1,36 +1,64 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Attempt } from '@prisma/client';
+import { ClockService } from '../common/clock.service';
+import { PrismaService } from '../prisma/prisma.service';
 
-/**
- * Owner: Rami (Task 5). The single place that decides an attempt's state.
- * Rami: write the attempt state table (every state, every request, every result) here in your first PR.
- */
+export const GRACE_SECONDS = 10;
 export const MSG_SUBMITTED = 'This test has already been submitted.';
 export const MSG_TERMINATED = 'This attempt was ended because the exam rules were broken.';
 export const MSG_TIME_OVER = 'Time is over. This attempt expired and was not submitted.';
 
 @Injectable()
 export class AttemptStateService {
-  // STUB: replace with real implementation (deadline + GRACE_SECONDS against ClockService.now())
-  isOverdue(_attempt: Pick<Attempt, 'status' | 'deadline'>): boolean {
-    return false;
+  private readonly logger = new Logger(AttemptStateService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly clock: ClockService,
+  ) {}
+
+  isOverdue(attempt: Pick<Attempt, 'status' | 'deadline'>, now: Date = this.clock.now()): boolean {
+    return attempt.status === 'IN_PROGRESS' && now.getTime() > attempt.deadline.getTime() + GRACE_SECONDS * 1000;
   }
 
-  // STUB: replace with real implementation (conditional updateMany IN_PROGRESS → EXPIRED, score null)
-  async expireOverdue(): Promise<number> {
-    return 0;
+  async expireOverdue() {
+    const cutoff = this.clock.now();
+    cutoff.setTime(cutoff.getTime() - GRACE_SECONDS * 1000);
+
+    const result = await this.prisma.attempt.updateMany({
+      where: { status: 'IN_PROGRESS', deadline: { lt: cutoff } },
+      data: { status: 'EXPIRED', score: null },
+    });
+
+    this.logger.log(`Expired ${result.count} overdue attempt(s).`);
+    return result.count;
   }
 
-  // STUB: replace with real implementation (409 with MSG_SUBMITTED / MSG_TERMINATED / MSG_TIME_OVER)
-  async assertAcceptingRequests(_attempt: Pick<Attempt, 'id' | 'status' | 'deadline'>): Promise<void> {}
-
-  // STUB: replace with real implementation (used by Majed for the content lock)
-  async hasAttempts(_testId: number): Promise<boolean> {
-    return false;
+  async assertAcceptingRequests(attempt: Pick<Attempt, 'id' | 'status' | 'deadline'>) {
+    if (attempt.status === 'SUBMITTED') {
+      throw new ConflictException(MSG_SUBMITTED);
+    }
+    if (attempt.status === 'TERMINATED') {
+      throw new ConflictException(MSG_TERMINATED);
+    }
+    if (attempt.status === 'EXPIRED' || this.isOverdue(attempt, this.clock.now())) {
+      if (attempt.status !== 'EXPIRED') {
+        await this.prisma.attempt.updateMany({
+          where: { id: attempt.id, status: 'IN_PROGRESS' },
+          data: { status: 'EXPIRED', score: null },
+        });
+      }
+      this.logger.warn(`Rejected late request for attempt ${attempt.id}.`);
+      throw new ConflictException(MSG_TIME_OVER);
+    }
   }
 
-  // STUB: replace with real implementation (used by Majed for unpublish)
-  async hasActiveAttempts(_testId: number): Promise<boolean> {
-    return false;
+  async hasAttempts(testId: number) {
+    return (await this.prisma.attempt.count({ where: { testId } })) > 0;
+  }
+
+  async hasActiveAttempts(testId: number) {
+    await this.expireOverdue();
+    return (await this.prisma.attempt.count({ where: { testId, status: 'IN_PROGRESS' } })) > 0;
   }
 }
