@@ -15,7 +15,7 @@ type AttemptRequest = Request & { params: { attemptId?: string }; user?: JwtPayl
 export class AttemptSessionGuard implements CanActivate {
   constructor(private readonly prisma: PrismaService) {}
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<AttemptRequest>();
     const attemptId = Number(request.params.attemptId);
     if (!Number.isInteger(attemptId) || attemptId < 1 || !request.user) return true;
