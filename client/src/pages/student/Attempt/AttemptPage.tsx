@@ -11,9 +11,11 @@ import { useExamGuard } from '../../../exam-guard/useExamGuard';
 import { useFullscreen } from '../../../exam-guard/useFullscreen';
 import ViolationWarningDialog from '../../../exam-guard/ViolationWarningDialog';
 import AttemptResult from './AttemptResult';
+import CodingTestView from './CodingTestView';
 import IntegrityStatus from './IntegrityStatus';
 import McqTestView from './McqTestView';
 import { useMcqChoices } from './useMcqChoices';
+import { useCodingDrafts } from './useCodingDrafts';
 import './AttemptPage.css';
 
 const REPLACED = 'This attempt is open in another window or device.';
@@ -62,6 +64,9 @@ export default function AttemptPage() {
 
   // The MCQ choices live here (outside the gate), so leaving full screen never loses them.
   const { choices, statuses, choose, buildAnswers } = useMcqChoices(current, saveMcqAnswer);
+
+  // The code and the selected problem live here too, for the same reason.
+  const { codeMap, setCode, selectedProblemId, selectProblem } = useCodingDrafts(current?.id ?? null);
 
   // "Continue here" needs the test id. A window that never loaded the attempt finds it in the test list.
   const resumeTestId = current?.testId ?? tests.find((test) => test.attemptId === attemptId)?.id ?? null;
@@ -159,8 +164,19 @@ export default function AttemptPage() {
           onSubmit={handleSubmit}
         />
       ) : (
-        // The coding view (step 16) will replace this placeholder.
-        <p className="attempt__placeholder">Coding view comes next: {current.problems?.length ?? 0} problems.</p>
+        <CodingTestView
+          problems={current.problems ?? []}
+          executionMode={current.executionMode}
+          deadline={current.deadline}
+          serverOffsetMs={serverOffsetMs}
+          selectedProblemId={selectedProblemId}
+          codeMap={codeMap}
+          isTimeUp={isTimeUp}
+          onSelectProblem={selectProblem}
+          onCodeChange={setCode}
+          onTimeUp={handleTimeUp}
+          onViolation={reportViolation}
+        />
       );
     content = (
       <FullscreenGate isFullscreen={isFullscreen} onEnter={enter}>
