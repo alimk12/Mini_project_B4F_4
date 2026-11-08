@@ -1,9 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Allow } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsInt, Min, ValidateIf } from 'class-validator';
 
-// Owner: Rami. STUB: replace @Allow() with the real validators and messages (API.md section 12).
 export class McqAnswerDto {
   @ApiProperty({ example: 22, nullable: true })
-  @Allow()
-  optionId: number | null;
+  @ValidateIf((_object, value) => value !== null)
+  @Type(() => Number)
+  @IsInt({ message: 'optionId must be a positive whole number or null.' })
+  @Min(1, { message: 'optionId must be a positive whole number or null.' })
+  optionId!: number | null;
 }

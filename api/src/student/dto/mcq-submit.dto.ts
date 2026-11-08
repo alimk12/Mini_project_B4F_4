@@ -1,19 +1,25 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Allow } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsInt, Min, ValidateNested } from 'class-validator';
 
-// Owner: Rami. STUB: replace @Allow() with the real validators and messages (API.md section 12).
 export class McqAnswerItemDto {
   @ApiProperty({ example: 7 })
-  @Allow()
-  questionId: number;
+  @Type(() => Number)
+  @IsInt({ message: 'Answers must be a list of { questionId, optionId }.' })
+  @Min(1, { message: 'Answers must be a list of { questionId, optionId }.' })
+  questionId!: number;
 
   @ApiProperty({ example: 22 })
-  @Allow()
-  optionId: number;
+  @Type(() => Number)
+  @IsInt({ message: 'Answers must be a list of { questionId, optionId }.' })
+  @Min(1, { message: 'Answers must be a list of { questionId, optionId }.' })
+  optionId!: number;
 }
 
 export class McqSubmitDto {
   @ApiProperty({ type: [McqAnswerItemDto] })
-  @Allow()
-  answers: McqAnswerItemDto[];
+  @IsArray({ message: 'Answers must be a list of { questionId, optionId }.' })
+  @ValidateNested({ each: true, message: 'Answers must be a list of { questionId, optionId }.' })
+  @Type(() => McqAnswerItemDto)
+  answers!: McqAnswerItemDto[];
 }
