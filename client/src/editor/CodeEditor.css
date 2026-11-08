@@ -1,1 +1,16 @@
-/* Owner: Maya. Classes with the code-editor- prefix. */
+.code-editor {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--color-code-bg);
+}
+
+.code-editor--readonly {
+  opacity: 0.85;
+}
+
+.code-editor__loading {
+  display: block;
+  padding: 1rem;
+  color: var(--color-on-dark);
+}
