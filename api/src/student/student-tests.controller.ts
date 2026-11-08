@@ -17,7 +17,10 @@ import { StudentTestsService } from './student-tests.service';
 @Roles('STUDENT')
 @Controller('student/tests')
 export class StudentTestsController {
-  constructor(private readonly tests: StudentTestsService, private readonly attempts: AttemptsService) {}
+  constructor(
+    private readonly tests: StudentTestsService,
+    private readonly attempts: AttemptsService,
+  ) {}
 
   @ApiOperation({ summary: 'Published tests in order, each with its state for this student' })
   @Get()
@@ -35,11 +38,11 @@ export class StudentTestsController {
   @Post(':testId/attempts')
   async startAttempt(
     @Param() p: TestIdParamDto,
-    @Body() _dto: StartAttemptDto,
+    @Body() dto: StartAttemptDto,
     @CurrentUser() user: JwtPayload,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { created, view } = await this.attempts.start(user.sub, p.testId);
+    const { created, view } = await this.attempts.start(user.sub, p.testId, dto);
     res.status(created ? 201 : 200);
     return view;
   }

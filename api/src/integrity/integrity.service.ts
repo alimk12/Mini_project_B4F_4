@@ -101,9 +101,15 @@ export class IntegrityService {
     });
   }
 
-  // STUB: replace with real implementation (store the new key; on resume log NEW_SESSION)
-  async issueSessionKey(_tx: Prisma.TransactionClient, _attemptId: number, _isResume: boolean): Promise<string> {
-    return randomUUID();
+  async issueSessionKey(tx: Prisma.TransactionClient, attemptId: number, isResume: boolean): Promise<string> {
+    const sessionKey = randomUUID();
+    await tx.attempt.update({ where: { id: attemptId }, data: { sessionKey } });
+    if (isResume) {
+      await tx.attemptViolation.create({
+        data: { attemptId, type: 'NEW_SESSION', counted: false, occurredAt: this.clock.now() },
+      });
+    }
+    return sessionKey;
   }
 
   // STUB: replace with real implementation
