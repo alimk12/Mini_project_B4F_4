@@ -1,4 +1,5 @@
 import { AttemptStatus, Prisma, TestType } from '@prisma/client';
+import { CLIPBOARD_VIOLATION_LIMIT, FOCUS_VIOLATION_LIMIT, MAX_RUNS_PER_PROBLEM } from '../../common/constants';
 
 export const studentAttemptSelect = (attemptId: number) =>
   ({
@@ -8,7 +9,6 @@ export const studentAttemptSelect = (attemptId: number) =>
     startedAt: true,
     deadline: true,
     submittedAt: true,
-    terminatedAt: true,
     terminationReason: true,
     score: true,
     questionOrder: true,
@@ -54,7 +54,6 @@ export const studentAttemptSelect = (attemptId: number) =>
 export type StudentAttemptRecord = Prisma.AttemptGetPayload<{ select: ReturnType<typeof studentAttemptSelect> }>;
 
 const FOCUS_TYPES = ['FULLSCREEN_EXIT', 'TAB_HIDDEN'];
-const MAX_RUNS_PER_PROBLEM = 20;
 
 export function toStudentQuestion(
   question: StudentAttemptRecord['test']['questions'][number],
@@ -70,8 +69,10 @@ export function toStudentQuestion(
   return { id: question.id, text: question.text, options, selectedOptionId };
 }
 
-export function toStudentProblem(problem: StudentAttemptRecord['test']['problems'][number]) {
-  const result = problem.results[0];
+export function toStudentProblem(
+  problem: StudentAttemptRecord['test']['problems'][number],
+  result: StudentAttemptRecord['test']['problems'][number]['results'][number] | undefined,
+) {
   const sample = problem.testCases[0];
   return {
     id: problem.id,
@@ -111,7 +112,7 @@ export function toStudentAttempt(attempt: StudentAttemptRecord, sessionKey: stri
   const questions = orderedQuestions.map((question) =>
     toStudentQuestion(question, answersByQuestion.get(question.id)?.optionId ?? null, optionOrder[String(question.id)]),
   );
-  const problems = attempt.test.problems.map(toStudentProblem);
+  const problems = attempt.test.problems.map((problem) => toStudentProblem(problem, problem.results[0]));
   const isFinished = attempt.status !== 'IN_PROGRESS';
   let result: Record<string, unknown> | null = null;
 
@@ -148,12 +149,16 @@ export function toStudentAttempt(attempt: StudentAttemptRecord, sessionKey: stri
     deadline: attempt.deadline.toISOString(),
     serverNow: serverNow.toISOString(),
     submittedAt: attempt.submittedAt?.toISOString() ?? null,
-    terminatedAt: attempt.terminatedAt?.toISOString() ?? null,
     sessionKey,
     questions: isFinished || attempt.test.type !== 'MCQ' ? null : questions,
     problems: isFinished || attempt.test.type !== 'CODING' ? null : problems,
     executionMode: attempt.test.type === 'CODING' ? executionMode : null,
-    integrity: { focusViolations, focusLimit: 2, clipboardViolations, clipboardLimit: 3 },
+    integrity: {
+      focusViolations,
+      focusLimit: FOCUS_VIOLATION_LIMIT,
+      clipboardViolations,
+      clipboardLimit: CLIPBOARD_VIOLATION_LIMIT,
+    },
     result,
   };
 }

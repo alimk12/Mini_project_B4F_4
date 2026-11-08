@@ -1,9 +1,9 @@
 import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { Attempt } from '@prisma/client';
+import { GRACE_SECONDS } from '../common/constants';
 import { ClockService } from '../common/clock.service';
 import { PrismaService } from '../prisma/prisma.service';
 
-export const GRACE_SECONDS = 10;
 export const MSG_SUBMITTED = 'This test has already been submitted.';
 export const MSG_TERMINATED = 'This attempt was ended because the exam rules were broken.';
 export const MSG_TIME_OVER = 'Time is over. This attempt expired and was not submitted.';
@@ -30,7 +30,9 @@ export class AttemptStateService {
       data: { status: 'EXPIRED', score: null },
     });
 
-    this.logger.log(`Expired ${result.count} overdue attempt(s).`);
+    if (result.count > 0) {
+      this.logger.log(`Expired ${result.count} overdue attempt(s).`);
+    }
     return result.count;
   }
 

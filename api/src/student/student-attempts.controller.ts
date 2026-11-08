@@ -46,7 +46,7 @@ export class StudentAttemptsController {
     return this.mcq.submit(user.sub, p.attemptId, dto);
   }
 
-  @ApiOperation({ summary: 'Run code on the sample case (no score, 20 runs per problem)' })
+  @ApiOperation({ summary: 'Run code on the sample case (no score, limited runs per problem)' })
   @HttpCode(200)
   @Post(':attemptId/problems/:problemId/run')
   runCode(@Param() p: AttemptProblemParamDto, @Body() dto: CodeDto, @CurrentUser() user: JwtPayload) {

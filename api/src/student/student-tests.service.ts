@@ -16,7 +16,7 @@ type StudentTestRecord = {
   _count: { questions: number; problems: number };
 };
 
-/** Owner: Rami (Task 5). API.md section 10. */
+/** Owner: Rami (Task T3). API.md section 10. */
 @Injectable()
 export class StudentTestsService {
   private readonly logger = new Logger(StudentTestsService.name);
@@ -50,7 +50,6 @@ export class StudentTestsService {
   }
 
   async getForStudent(userId: number, testId: number) {
-    await this.attemptState.expireOverdue();
     const test = await this.prisma.test.findUnique({
       where: { id: testId },
       select: { id: true, status: true, order: true },
@@ -81,6 +80,7 @@ export class StudentTestsService {
 
     const previousStatus = previousTest.attempts[0]?.status;
     if (previousStatus !== 'SUBMITTED' && previousStatus !== 'EXPIRED' && previousStatus !== 'TERMINATED') {
+      this.logger.warn(`Forbidden start of locked test ${test.id} by user ${userId}.`);
       throw new ForbiddenException(`Complete the ${previousTest.title} first.`);
     }
   }

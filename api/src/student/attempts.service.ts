@@ -12,7 +12,7 @@ import { StudentTestsService } from './student-tests.service';
 
 const MSG_ALREADY_FINISHED = 'You have already finished this test.';
 
-/** Owner: Rami (Task 5). API.md section 11 and 19.4–19.6. */
+/** Owner: Rami (Tasks T4/T5). API.md sections 9 and 19.4–19.6. */
 @Injectable()
 export class AttemptsService {
   private readonly logger = new Logger(AttemptsService.name);
@@ -41,6 +41,7 @@ export class AttemptsService {
       select: { id: true, status: true, deadline: true },
     });
     if (existing?.status === 'IN_PROGRESS') {
+      // expireOverdue() ran immediately before the lookup; retain this guard for the deadline boundary race.
       if (this.attemptState.isOverdue(existing)) {
         await this.attemptState.expireOverdue();
         throw new ConflictException(MSG_ALREADY_FINISHED);
@@ -52,15 +53,16 @@ export class AttemptsService {
     await this.studentTests.assertCanStart(userId, test);
 
     try {
-      const questions =
+      const order =
         test.type === 'MCQ'
-          ? await this.prisma.question.findMany({
-              where: { testId },
-              orderBy: { position: 'asc' },
-              select: { id: true, options: { select: { id: true } } },
-            })
-          : [];
-      const { questionOrder, optionOrder } = buildAttemptOrder(questions);
+          ? buildAttemptOrder(
+              await this.prisma.question.findMany({
+                where: { testId },
+                orderBy: { position: 'asc' },
+                select: { id: true, options: { select: { id: true } } },
+              }),
+            )
+          : null;
       const startedAt = this.clock.now();
       const deadline = new Date(startedAt.getTime() + test.durationMinutes * 60_000);
 
@@ -72,8 +74,9 @@ export class AttemptsService {
             status: 'IN_PROGRESS',
             startedAt,
             deadline,
-            questionOrder,
-            optionOrder,
+            ...(order
+              ? { questionOrder: order.questionOrder, optionOrder: order.optionOrder }
+              : {}),
           },
           select: { id: true },
         });

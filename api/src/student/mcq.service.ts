@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AttemptStateService } from '../attempt-state/attempt-state.service';
 import { ScoringService } from '../attempt-state/scoring.service';
 import { ClockService } from '../common/clock.service';
@@ -13,6 +13,8 @@ const MSG_DUPLICATE_QUESTION = 'Each question can be answered only once.';
 
 @Injectable()
 export class McqService {
+  private readonly logger = new Logger(McqService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly attemptState: AttemptStateService,
@@ -46,25 +48,31 @@ export class McqService {
     }
 
     const savedAt = this.clock.now();
-    await this.prisma.mcqAnswer.upsert({
-      where: { attemptId_questionId: { attemptId, questionId } },
-      create: { attemptId, questionId, optionId: dto.optionId, isCorrect },
-      update: { optionId: dto.optionId, isCorrect },
+    await this.prisma.$transaction(async (tx) => {
+      const open = await tx.$queryRaw<{ id: number }[]>`
+        SELECT id FROM attempts WHERE id = ${attemptId} AND status = 'IN_PROGRESS' FOR UPDATE
+      `;
+      if (open.length === 0) {
+        const currentAttempt = await tx.attempt.findFirst({
+          where: { id: attemptId, userId },
+          select: { id: true, status: true, deadline: true },
+        });
+        if (!currentAttempt) throw new NotFoundException('Attempt not found.');
+        await this.attemptState.assertAcceptingRequests(currentAttempt);
+        throw new ConflictException('This test has already been submitted.');
+      }
+
+      await tx.mcqAnswer.upsert({
+        where: { attemptId_questionId: { attemptId, questionId } },
+        create: { attemptId, questionId, optionId: dto.optionId, isCorrect },
+        update: { optionId: dto.optionId, isCorrect },
+      });
     });
 
     return { questionId, optionId: dto.optionId, savedAt: savedAt.toISOString() };
   }
 
   async submit(userId: number, attemptId: number, dto: McqSubmitDto) {
-    if (!Array.isArray(dto.answers)) {
-      throw new BadRequestException('Answers must be a list of { questionId, optionId }.');
-    }
-    for (const answer of dto.answers) {
-      if (!Number.isInteger(answer?.questionId) || answer.questionId <= 0 || !Number.isInteger(answer?.optionId) || answer.optionId <= 0) {
-        throw new BadRequestException('Answers must be a list of { questionId, optionId }.');
-      }
-    }
-
     const attempt = await this.prisma.attempt.findFirst({
       where: { id: attemptId, userId },
       select: {
@@ -102,12 +110,18 @@ export class McqService {
     }
 
     const submittedAt = this.clock.now();
-    return this.prisma.$transaction(async (tx) => {
+    const response = await this.prisma.$transaction(async (tx) => {
       const changed = await tx.attempt.updateMany({
         where: { id: attemptId, userId, status: 'IN_PROGRESS' },
         data: { status: 'SUBMITTED', submittedAt },
       });
       if (changed.count !== 1) {
+        const currentAttempt = await tx.attempt.findFirst({
+          where: { id: attemptId, userId },
+          select: { id: true, status: true, deadline: true },
+        });
+        if (!currentAttempt) throw new NotFoundException('Attempt not found.');
+        await this.attemptState.assertAcceptingRequests(currentAttempt);
         throw new ConflictException('This test has already been submitted.');
       }
 
@@ -138,5 +152,7 @@ export class McqService {
         submittedAt: submittedAt.toISOString(),
       };
     });
+    this.logger.log(`MCQ submitted: attempt ${attemptId}, ${response.correctCount}/${response.totalCount}, score ${response.score}.`);
+    return response;
   }
 }

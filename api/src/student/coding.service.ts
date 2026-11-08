@@ -3,13 +3,14 @@ import {
   ConflictException,
   HttpException,
   Injectable,
+  Logger,
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { AttemptStateService } from '../attempt-state/attempt-state.service';
+import { AttemptStateService, MSG_SUBMITTED } from '../attempt-state/attempt-state.service';
 import { ScoringService } from '../attempt-state/scoring.service';
 import { ClockService } from '../common/clock.service';
-import { MAX_CODE_LENGTH, MAX_RUNS_PER_PROBLEM } from '../common/constants';
+import { MAX_RUNS_PER_PROBLEM } from '../common/constants';
 import { round1 } from '../common/round.util';
 import { CodeExecutionService, MSG_RUN_UNAVAILABLE, MSG_SUBMIT_UNAVAILABLE } from '../execution/code-execution.service';
 import { ExecutionUnavailableError, ProblemForExecution } from '../execution/execution.types';
@@ -18,6 +19,8 @@ import { PrismaService } from '../prisma/prisma.service';
 /** Owner: Rami (Task 5), using Majed's CodeExecutionService. API.md section 14. */
 @Injectable()
 export class CodingService {
+  private readonly logger = new Logger(CodingService.name);
+
   constructor(
     private readonly execution: CodeExecutionService,
     private readonly prisma: PrismaService,
@@ -27,7 +30,6 @@ export class CodingService {
   ) {}
 
   async run(userId: number, attemptId: number, problemId: number, code: string) {
-    this.validateCode(code);
     const { problem } = await this.getProblemContext(userId, attemptId, problemId, 'SAMPLE');
     const runCount = await this.prisma.$transaction(async (tx) => {
       const reserved = await tx.problemResult.updateMany({
@@ -35,7 +37,7 @@ export class CodingService {
         data: { runCount: { increment: 1 } },
       });
       if (reserved.count !== 1) {
-        throw new ConflictException('You have used all 20 runs for this problem.');
+        throw new ConflictException(`You have used all ${MAX_RUNS_PER_PROBLEM} runs for this problem.`);
       }
       const result = await tx.problemResult.findUnique({
         where: { attemptId_problemId: { attemptId, problemId } },
@@ -65,7 +67,6 @@ export class CodingService {
   }
 
   async submit(userId: number, attemptId: number, problemId: number, code: string) {
-    this.validateCode(code);
     const { problem, result } = await this.getProblemContext(userId, attemptId, problemId, 'HIDDEN');
     if (result.submittedAt) throw new ConflictException('This problem has already been submitted.');
 
@@ -83,7 +84,7 @@ export class CodingService {
     const points = outcome.totalCount === 0 ? 0 : round1((problem.points * outcome.passedCount) / outcome.totalCount);
     const submittedAt = this.clock.now();
     const saved = await this.prisma.problemResult.updateMany({
-      where: { attemptId, problemId, submittedAt: null },
+      where: { attemptId, problemId, submittedAt: null, attempt: { status: 'IN_PROGRESS' } },
       data: {
         code,
         passedCount: outcome.passedCount,
@@ -92,7 +93,25 @@ export class CodingService {
         submittedAt,
       },
     });
-    if (saved.count !== 1) throw new ConflictException('This problem has already been submitted.');
+    if (saved.count !== 1) {
+      const currentResult = await this.prisma.problemResult.findUnique({
+        where: { attemptId_problemId: { attemptId, problemId } },
+        select: { submittedAt: true },
+      });
+      if (currentResult?.submittedAt) {
+        throw new ConflictException('This problem has already been submitted.');
+      }
+
+      const currentAttempt = await this.prisma.attempt.findFirst({
+        where: { id: attemptId, userId },
+        select: { id: true, status: true, deadline: true },
+      });
+      if (!currentAttempt) throw new NotFoundException('Attempt not found.');
+      await this.attemptState.assertAcceptingRequests(currentAttempt);
+      throw new ConflictException('This problem has already been submitted.');
+    }
+
+    this.logger.log(`Problem ${problemId} submitted for attempt ${attemptId} (${outcome.passedCount}/${outcome.totalCount}).`);
 
     return {
       problemId,
@@ -106,24 +125,31 @@ export class CodingService {
   }
 
   async finish(userId: number, attemptId: number) {
-    return this.prisma.$transaction(async (tx) => {
-      const attempt = await tx.attempt.findFirst({
-        where: { id: attemptId, userId },
-        select: { id: true, status: true, deadline: true, test: { select: { type: true } } },
-      });
-      if (!attempt) throw new NotFoundException('Attempt not found.');
+    const attempt = await this.prisma.attempt.findFirst({
+      where: { id: attemptId, userId },
+      select: { id: true, status: true, deadline: true, test: { select: { type: true } } },
+    });
+    if (!attempt) throw new NotFoundException('Attempt not found.');
+    if (attempt.test.type !== 'CODING') {
+      throw new BadRequestException('This action is only for the coding test.');
+    }
+    await this.attemptState.assertAcceptingRequests(attempt);
 
-      await this.attemptState.assertAcceptingRequests(attempt);
-      if (attempt.test.type !== 'CODING') {
-        throw new BadRequestException('This action is only for the coding test.');
-      }
-
+    const response = await this.prisma.$transaction(async (tx) => {
       const submittedAt = this.clock.now();
       const changed = await tx.attempt.updateMany({
         where: { id: attemptId, userId, status: 'IN_PROGRESS' },
         data: { status: 'SUBMITTED', submittedAt },
       });
-      if (changed.count !== 1) throw new ConflictException('This attempt has already been finished.');
+      if (changed.count !== 1) {
+        const currentAttempt = await tx.attempt.findFirst({
+          where: { id: attemptId, userId },
+          select: { id: true, status: true, deadline: true },
+        });
+        if (!currentAttempt) throw new NotFoundException('Attempt not found.');
+        await this.attemptState.assertAcceptingRequests(currentAttempt);
+        throw new ConflictException(MSG_SUBMITTED);
+      }
 
       const result = await this.scoring.scoreCoding(tx, attemptId);
       await tx.attempt.update({ where: { id: attemptId }, data: { score: result.score } });
@@ -137,15 +163,8 @@ export class CodingService {
         problems: result.problems,
       };
     });
-  }
-
-  private validateCode(code: string): void {
-    if (typeof code !== 'string' || code.trim().length === 0) {
-      throw new BadRequestException('Code cannot be empty.');
-    }
-    if (code.length > MAX_CODE_LENGTH) {
-      throw new BadRequestException('Code cannot be longer than 10,000 characters.');
-    }
+    this.logger.log(`Coding attempt ${attemptId} finished with score ${response.score}.`);
+    return response;
   }
 
   private async getProblemContext(userId: number, attemptId: number, problemId: number, visibility: 'SAMPLE' | 'HIDDEN') {
@@ -163,7 +182,6 @@ export class CodingService {
     if (attempt.test.type !== 'CODING') {
       throw new BadRequestException('This action is only for the coding test.');
     }
-    await this.attemptState.assertAcceptingRequests(attempt);
 
     const problem = await this.prisma.problem.findFirst({
       where: { id: problemId, testId: attempt.testId },
@@ -186,6 +204,7 @@ export class CodingService {
     if (!problem) throw new NotFoundException('Problem not found in this test.');
     const result = problem.results[0];
     if (!result) throw new NotFoundException('Problem not found in this test.');
+    await this.attemptState.assertAcceptingRequests(attempt);
 
     const executionProblem: ProblemForExecution & { points: number } = {
       functionName: problem.functionName,
