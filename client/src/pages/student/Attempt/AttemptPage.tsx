@@ -43,7 +43,7 @@ export default function AttemptPage() {
     attempt, attemptError, loadAttempt, startAttempt, isSessionReplaced,
     serverOffsetMs, saveMcqAnswer, submitMcq, isSubmitting, actionError,
     integrity, lastWarning, reportViolation, clearWarning,
-  } = useAttempt();
+    runResults, runningProblemId, runCode,  } = useAttempt();
   const { tests, loadTests } = useStudentTests();
   const { isFullscreen, enter, exit } = useFullscreen();
   const navigate = useNavigate();
@@ -171,9 +171,14 @@ export default function AttemptPage() {
           serverOffsetMs={serverOffsetMs}
           selectedProblemId={selectedProblemId}
           codeMap={codeMap}
+          runResults={runResults}
+          runningProblemId={runningProblemId}
+          isSubmitting={isSubmitting}
+          actionError={actionError}
           isTimeUp={isTimeUp}
           onSelectProblem={selectProblem}
           onCodeChange={setCode}
+          onRun={runCode}
           onTimeUp={handleTimeUp}
           onViolation={reportViolation}
         />
