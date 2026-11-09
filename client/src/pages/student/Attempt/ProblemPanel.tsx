@@ -1,20 +1,24 @@
 import { useState } from 'react';
 import Button from '../../../components/common/Button';
+import ConfirmDialog from '../../../components/common/ConfirmDialog';
 import CodeEditor from '../../../editor/CodeEditor';
 import { RunResult } from '../../../types/execution.types';
 import { StudentProblem } from '../../../types/student.types';
 import RunOutput from './RunOutput';
+import SubmitResultBox from './SubmitResultBox';
 
 interface Props {
   problem: StudentProblem;
   code: string;
   isReadOnly: boolean;
   isRunning: boolean;
-  isBusy: boolean; // another action (like submit) is running
+  isBusy: boolean; // a run or a submit is working
+  isSubmitting: boolean;
   runResult: RunResult | undefined;
   actionError: string | null;
   onCodeChange(code: string): void;
   onRun(code: string): void;
+  onSubmit(code: string): Promise<boolean>;
   onViolation?: (type: 'PASTE_EXTERNAL' | 'DROP_EXTERNAL') => void;
 }
 
@@ -22,13 +26,15 @@ interface Props {
 const show = (value: unknown) => JSON.stringify(value);
 
 export default function ProblemPanel({
-  problem, code, isReadOnly, isRunning, isBusy, runResult, actionError, onCodeChange, onRun, onViolation,
+  problem, code, isReadOnly, isRunning, isBusy, isSubmitting, runResult, actionError, onCodeChange, onRun, onSubmit, onViolation,
 }: Props) {
   const [hasRunHere, setHasRunHere] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
 
   const noRunsLeft = problem.runsRemaining <= 0;
-  // Disabled while running, with no runs left, after submit and after the time is up (both make isReadOnly true).
+  // isReadOnly is true after the problem is submitted and after the time is up.
   const canRun = !isReadOnly && !isRunning && !isBusy && !noRunsLeft;
+  const canSubmit = !isReadOnly && !isRunning && !isBusy;
 
   // The marker is shown only for a run made on this screen, and it is cleared while the next run is working,
   // so the same line is marked again if the error repeats.
@@ -37,6 +43,11 @@ export default function ProblemPanel({
   function handleRun() {
     setHasRunHere(true);
     onRun(code);
+  }
+
+  async function handleConfirmSubmit() {
+    await onSubmit(code);
+    setIsConfirmOpen(false);
   }
 
   return (
@@ -70,8 +81,11 @@ export default function ProblemPanel({
       />
 
       <div className="attempt__actions">
-        <Button variant="primary" disabled={!canRun} isLoading={isRunning} onClick={handleRun}>
+        <Button variant="secondary" disabled={!canRun} isLoading={isRunning} onClick={handleRun}>
           Run ({problem.runsRemaining} left)
+        </Button>
+        <Button variant="primary" disabled={!canSubmit} onClick={() => setIsConfirmOpen(true)}>
+          Submit
         </Button>
       </div>
 
@@ -83,6 +97,19 @@ export default function ProblemPanel({
       )}
 
       {runResult && <RunOutput result={runResult} />}
+      <SubmitResultBox problem={problem} />
+
+      {/* Outside .attempt__actions on purpose. */}
+      <ConfirmDialog
+        isOpen={isConfirmOpen && canSubmit}
+        title="Submit this problem?"
+        confirmLabel="Submit"
+        isLoading={isSubmitting}
+        onConfirm={handleConfirmSubmit}
+        onCancel={() => setIsConfirmOpen(false)}
+      >
+        <p>You can submit this problem only once. Submit now?</p>
+      </ConfirmDialog>
     </section>
   );
 }

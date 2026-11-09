@@ -40,10 +40,26 @@ export default function AttemptPage() {
   const isValidId = Number.isInteger(attemptId) && attemptId > 0;
 
   const {
-    attempt, attemptError, loadAttempt, startAttempt, isSessionReplaced,
-    serverOffsetMs, saveMcqAnswer, submitMcq, isSubmitting, actionError,
-    integrity, lastWarning, reportViolation, clearWarning,
-    runResults, runningProblemId, runCode,  } = useAttempt();
+    attempt,
+    attemptError,
+    loadAttempt,
+    startAttempt,
+    isSessionReplaced,
+    serverOffsetMs,
+    saveMcqAnswer,
+    submitMcq,
+    isSubmitting,
+    actionError,
+    integrity,
+    lastWarning,
+    reportViolation,
+    clearWarning,
+    runResults,
+    runningProblemId,
+    runCode,
+    submitCode,
+    finishCoding,
+  } = useAttempt();
   const { tests, loadTests } = useStudentTests();
   const { isFullscreen, enter, exit } = useFullscreen();
   const navigate = useNavigate();
@@ -89,9 +105,12 @@ export default function AttemptPage() {
   // Time is over: after the grace period the server has expired the attempt, so reload it.
   useEffect(() => {
     if (!isTimeUp) return;
-    const timer = window.setTimeout(() => {
-      void loadAttempt(attemptId);
-    }, GRACE_SECONDS * 1000 + 1000);
+    const timer = window.setTimeout(
+      () => {
+        void loadAttempt(attemptId);
+      },
+      GRACE_SECONDS * 1000 + 1000,
+    );
     return () => window.clearTimeout(timer);
   }, [isTimeUp, attemptId, loadAttempt]);
 
@@ -179,6 +198,8 @@ export default function AttemptPage() {
           onSelectProblem={selectProblem}
           onCodeChange={setCode}
           onRun={runCode}
+          onSubmit={submitCode}
+          onFinish={finishCoding}
           onTimeUp={handleTimeUp}
           onViolation={reportViolation}
         />
